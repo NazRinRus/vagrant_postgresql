@@ -1,0 +1,3 @@
+{% for key in postgresql_conf | sort %}
+{{ key }} = {{ postgresql_conf[key] }}
+{% endfor %}

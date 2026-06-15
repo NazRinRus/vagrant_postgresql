@@ -1,0 +1,1 @@
+{"disk":[{"uuid":"d644fdd9-69c7-405d-a354-c62d2c5e96e9","name":"pg_data_02","controller":"SCSI","port":"2","device":"0"},{"uuid":"e457fcef-5f84-4034-a541-3fc3c16628be","name":"pg_wal_02","controller":"SCSI","port":"3","device":"0"}],"floppy":[],"dvd":[]}

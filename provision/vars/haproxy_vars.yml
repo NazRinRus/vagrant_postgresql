@@ -1,0 +1,48 @@
+---
+master_host: "192.168.56.10"
+replica_host: "192.168.56.11"
+
+haproxy_apt_packages: [haproxy]
+haproxy_config_file: /etc/haproxy/haproxy.cfg
+
+haproxy_iptables_ports:
+  - "5432"
+  - "5433"
+  - "7000"
+
+haproxy_stats_pass: haproxy
+
+haproxy_config: |
+  global
+      log /dev/log    local0
+      log /dev/log    local1 notice
+      maxconn 100000
+      daemon
+      user haproxy
+      group haproxy
+      chroot /var/lib/haproxy/
+      stats socket /run/haproxy/info.sock mode 666 level user
+  defaults
+      fullconn 100000
+      maxconn 100000
+      log global
+      mode tcp
+      retries 2
+      # timeout client 30m
+      timeout connect 4s
+      # timeout server 30m
+      timeout check 5s
+  listen stats
+      mode http
+      bind *:7000
+      stats enable
+      stats uri /
+      stats auth haproxystats:{{ haproxy_stats_pass }}
+  listen postgres_master
+      bind *:5432
+      default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+        server postgresql01 {{ master_host }}:5432 maxconn 20000 check
+  listen postgres_replica
+      bind *:5433
+      default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+        server postgresql02 {{ replica_host }}:5432 maxconn 20000 check

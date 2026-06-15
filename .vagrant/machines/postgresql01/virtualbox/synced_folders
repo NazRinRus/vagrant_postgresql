@@ -1,0 +1,1 @@
+{"virtualbox":{"/opt/scripts":{"guestpath":"/opt/scripts","hostpath":"/home/nazrinrus/vagrant/postgresql/scripts","disabled":false,"__vagrantfile":true},"/vagrant":{"guestpath":"/vagrant","hostpath":"/home/nazrinrus/vagrant/postgresql","disabled":false,"__vagrantfile":true}}}

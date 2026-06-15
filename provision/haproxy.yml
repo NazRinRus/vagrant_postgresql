@@ -1,0 +1,63 @@
+---
+- name: Install and configure PostgreSQL server
+  hosts: all
+  become: true
+  vars_files:
+  - vars/haproxy_vars.yml
+  tasks:
+  - name: apt update cache
+    apt:
+      update_cache: true
+
+  - name: configure iptables for haproxy
+    ansible.builtin.iptables:
+      chain: INPUT
+      protocol: tcp
+      destination_port: "{{ haproxy_iptables_port_loop }}"
+      jump: ACCEPT
+      comment: haproxy
+    loop: "{{ haproxy_iptables_ports }}"
+    loop_control:
+      loop_var: haproxy_iptables_port_loop
+
+  - name: install haproxy
+    package:
+      name: "{{ haproxy_apt_package_loop }}"
+      state: present
+    loop: "{{ haproxy_apt_packages }}"
+    loop_control:
+      loop_var: haproxy_apt_package_loop
+
+  - name: ensure haproxy unit-override directory exists
+    file: 
+      path: /etc/systemd/system/haproxy.service.d
+      state: directory
+
+  - name: copy haproxy unit-override
+    template:
+      src: templates/override.conf.j2
+      dest: /etc/systemd/system/haproxy.service.d/override.conf
+    register: unit_override
+
+  - name: systemd daemon-reload
+    systemd:
+      daemon_reload: yes
+    when: unit_override.changed
+
+  - name: copy haproxy config
+    template: 
+      src: templates/haproxy.cfg.j2
+      dest: "{{ haproxy_config_file }}"
+    register: copy_haproxy_config
+
+  - name: start haproxy
+    service:
+      name: haproxy
+      state: started
+      enabled: true
+
+  - name: reload haproxy if config changed
+    service:
+      name: haproxy
+      state: reloaded
+    when: copy_haproxy_config.changed

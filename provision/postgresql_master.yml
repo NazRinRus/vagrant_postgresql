@@ -1,0 +1,141 @@
+---
+- name: Install and configure PostgreSQL server
+  hosts: all
+  become: true
+  vars_files:
+  - vars/pg_vars.yml
+  tasks:
+  - name: Add PostgreSQL Apt signing key
+    apt_key:
+      url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+      state: present
+
+  - name: Add PostgreSQL repo
+    apt_repository:
+      repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+      state: present
+    register: pgrepo
+
+  - name: apt update cache
+    apt:
+      update_cache: true
+    when: pgrepo.changed 
+
+  - name: install packages
+    package: 
+      name: "{{ postgres_apt_package_loop }}"
+      state: present
+    loop: "{{ postgres_apt_packages }}"
+    loop_control:
+      loop_var: postgres_apt_package_loop
+  
+  - name: stop postgresql service
+    service:
+      name: postgresql
+      state: stopped
+      enabled: false
+
+  - name: configure iptables for postgresql
+    ansible.builtin.iptables:
+      chain: INPUT
+      protocol: tcp
+      destination_port: "{{ postgresql_iptables_port_loop }}"
+      jump: ACCEPT
+      comment: postgresql
+    loop:
+    - "{{ postgresql_conf.port }}"
+    loop_control:
+      loop_var: postgresql_iptables_port_loop
+
+  - name: set swappiness
+    ansible.posix.sysctl:
+      name: vm.swappiness
+      value: '1'
+      state: present
+      sysctl_set: yes
+      reload: yes
+
+  - name: create postgresql directories
+    file:
+      name: "{{ postgresql_dirs_loop }}"
+      state: directory
+      mode: "0750"
+      owner: postgres
+      group: postgres
+    loop:
+    - "{{ pg_data }}"
+    - "{{ pg_wal }}"
+    loop_control:
+      loop_var: postgresql_dirs_loop
+    when: postgresql_dirs_loop not in (None, omit)
+
+  - name: Find all binaries in /usr/lib/postgresql/
+    find:
+      paths: "/usr/lib/postgresql/{{ pg_version }}/bin/"
+    register: pg_binaries
+
+  - name: Create symlinks to /usr/local/bin
+    file:
+      src: "{{ pg_binaries_loop.path }}"
+      path: "/usr/local/bin/{{ pg_binaries_loop.path | basename }}"
+      state: link
+    no_log: true
+    loop: "{{ pg_binaries.files }}"
+    loop_control:
+      loop_var: pg_binaries_loop
+
+  - name: copy postgresql config
+    template:
+      src: templates/postgresql.conf.j2
+      dest: /etc/postgresql/{{ pg_version }}/main/postgresql.conf
+      owner: postgres
+      group: postgres
+    register: copy_postgresql_config
+    tags: postgresql_conf
+
+  - name: copy pg_hba
+    template:
+      src: templates/pg_hba.conf.j2
+      dest: /etc/postgresql/{{ pg_version }}/main/pg_hba.conf
+      owner: postgres
+      group: postgres
+    register: copy_pg_hba
+    tags: postgresql_pg_hba
+
+  - name: reload if config changed
+    service:
+      name: postgresql
+      state: reloaded
+    when: copy_postgresql_config.changed and copy_pg_hba.changed
+    tags: postgresql_conf
+
+  - name: Copy PostgreSQL data to new location
+    copy:
+      src: /var/lib/postgresql/{{ pg_version }}/main/
+      dest: "{{ pg_data }}/"
+      owner: postgres
+      group: postgres
+      mode: preserve
+      remote_src: yes
+    become: yes
+
+  - name: start postgresql
+    service:
+      name: "postgresql@{{ pg_version }}-{{ cluster_name }}"
+      state: started
+      enabled: true
+
+  - name: Set postgres superuser password
+    shell: |
+      sudo -u postgres psql -c "ALTER USER {{ superuser.username }} WITH PASSWORD '{{ superuser.password }}';"
+    no_log: true
+
+  - name: Create replicator user
+    shell: |
+      sudo -u postgres psql -c "CREATE USER {{ replicauser.username }} WITH REPLICATION LOGIN PASSWORD '{{ replicauser.password }}';"
+    no_log: true
+
+  - name: Create replication slot
+    shell: |
+      sudo -u postgres psql -c "SELECT pg_create_physical_replication_slot('replica_slot');"
+    no_log: true
